@@ -18,6 +18,7 @@ from __future__ import annotations
 import collections
 from concurrent import futures
 import enum
+import functools
 import logging
 import threading
 import time
@@ -50,6 +51,7 @@ from grpc._typing import ResponseType
 from grpc._typing import SerializingFunction
 from grpc._typing import ServerCallbackTag
 from grpc._typing import ServerTagCallbackType
+from grpc._utilities import RpcMethodHandler
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -76,6 +78,8 @@ _EMPTY_FLAGS = 0
 
 _DEALLOCATED_SERVER_CHECK_PERIOD_S = 1.0
 _INF_TIMEOUT = 1e9
+
+_CallbackFunction = Callback[..., Any]
 
 
 def _serialized_request(request_event: cygrpc.BaseEvent) -> bytes:
@@ -922,6 +926,33 @@ def _handle_stream_stream(
     )
 
 
+def _create_callback_decorator() -> Callable[[_CallbackFunction], _CallbackFunction]:
+    return lambda callback: callback
+
+
+try:
+    import contextvars  # pylint: disable=wrong-import-position
+
+    def _create_contextvars_callback_decorator() -> Callable[[_CallbackFunction], _CallbackFunction]:
+        context = contextvars.copy_context()
+
+        def decorator(func: _CallbackFunction) -> _CallbackFunction:
+            if func is None:
+                return func
+
+            @functools.wraps(func)
+            def wrapper(*args, **kwargs) -> Any:
+                return context.run(func, *args, **kwargs)
+
+            return wrapper
+
+        return decorator
+
+    _create_callback_decorator = _create_contextvars_callback_decorator
+except ImportError:
+    pass  # Support versions predating contextvars.
+
+
 def _find_method_handler(
     rpc_event: cygrpc.BaseEvent,
     generic_handlers: List[grpc.GenericRpcHandler],
@@ -941,12 +972,29 @@ def _find_method_handler(
         rpc_event.invocation_metadata,
     )
 
+    callback_decorator = _create_callback_decorator()
+
+    method_handler: Optional[grpc.RpcMethodHandler]
     if interceptor_pipeline is not None:
-        return interceptor_pipeline.execute(
-            query_handlers, handler_call_details
-        )
+        execute = callback_decorator(interceptor_pipeline.execute)
+        query_handlers_in_unique_context = _create_callback_decorator()(query_handlers)
+        method_handler = execute(query_handlers_in_unique_context, handler_call_details)
     else:
-        return query_handlers(handler_call_details)
+        method_handler = query_handlers(handler_call_details)
+
+    if method_handler:
+        method_handler = RpcMethodHandler(
+            request_streaming=method_handler.request_streaming,
+            response_streaming=method_handler.response_streaming,
+            request_deserializer=method_handler.request_deserializer,
+            response_serializer=method_handler.response_serializer,
+            unary_unary=callback_decorator(method_handler.unary_unary),
+            unary_stream=callback_decorator(method_handler.unary_stream),
+            stream_unary=callback_decorator(method_handler.stream_unary),
+            stream_stream=callback_decorator(method_handler.stream_stream),
+        )
+
+    return method_handler
 
 
 def _reject_rpc(
