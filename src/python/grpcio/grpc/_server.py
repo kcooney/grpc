@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import collections
 from concurrent import futures
+import contextvars
 import enum
 import logging
 import threading
@@ -832,6 +833,7 @@ def _select_thread_pool_for_behavior(
 
 def _handle_unary_unary(
     rpc_event: cygrpc.BaseEvent,
+    context: contextvars.Context,
     state: _RPCState,
     method_handler: grpc.RpcMethodHandler,
     default_thread_pool: futures.ThreadPoolExecutor,
@@ -843,6 +845,7 @@ def _handle_unary_unary(
         method_handler.unary_unary, default_thread_pool
     )
     return thread_pool.submit(
+        context.run,
         _unary_response_in_pool,
         rpc_event,
         state,
@@ -855,6 +858,7 @@ def _handle_unary_unary(
 
 def _handle_unary_stream(
     rpc_event: cygrpc.BaseEvent,
+    context: contextvars.Context,
     state: _RPCState,
     method_handler: grpc.RpcMethodHandler,
     default_thread_pool: futures.ThreadPoolExecutor,
@@ -866,6 +870,7 @@ def _handle_unary_stream(
         method_handler.unary_stream, default_thread_pool
     )
     return thread_pool.submit(
+        context.run,
         _stream_response_in_pool,
         rpc_event,
         state,
@@ -878,6 +883,7 @@ def _handle_unary_stream(
 
 def _handle_stream_unary(
     rpc_event: cygrpc.BaseEvent,
+    context: contextvars.Context,
     state: _RPCState,
     method_handler: grpc.RpcMethodHandler,
     default_thread_pool: futures.ThreadPoolExecutor,
@@ -889,6 +895,7 @@ def _handle_stream_unary(
         method_handler.stream_unary, default_thread_pool
     )
     return thread_pool.submit(
+        context.run,
         _unary_response_in_pool,
         rpc_event,
         state,
@@ -901,6 +908,7 @@ def _handle_stream_unary(
 
 def _handle_stream_stream(
     rpc_event: cygrpc.BaseEvent,
+    context: contextvars.Context,
     state: _RPCState,
     method_handler: grpc.RpcMethodHandler,
     default_thread_pool: futures.ThreadPoolExecutor,
@@ -912,6 +920,7 @@ def _handle_stream_stream(
         method_handler.stream_stream, default_thread_pool
     )
     return thread_pool.submit(
+        context.run,
         _stream_response_in_pool,
         rpc_event,
         state,
@@ -924,6 +933,7 @@ def _handle_stream_stream(
 
 def _find_method_handler(
     rpc_event: cygrpc.BaseEvent,
+    context: contextvars.Context,
     generic_handlers: List[grpc.GenericRpcHandler],
     interceptor_pipeline: Optional[_interceptor._ServicePipeline],
 ) -> Optional[grpc.RpcMethodHandler]:
@@ -942,11 +952,10 @@ def _find_method_handler(
     )
 
     if interceptor_pipeline is not None:
-        return interceptor_pipeline.execute(
-            query_handlers, handler_call_details
-        )
+        return context.run(
+            interceptor_pipeline.execute, query_handlers, handler_call_details)
     else:
-        return query_handlers(handler_call_details)
+        return context.run(query_handlers, handler_call_details)
 
 
 def _reject_rpc(
@@ -972,6 +981,7 @@ def _reject_rpc(
 
 def _handle_with_method_handler(
     rpc_event: cygrpc.BaseEvent,
+    context: contextvars.Context,
     method_handler: grpc.RpcMethodHandler,
     thread_pool: futures.ThreadPoolExecutor,
 ) -> Tuple[_RPCState, futures.Future]:
@@ -985,20 +995,20 @@ def _handle_with_method_handler(
         if method_handler.request_streaming:
             if method_handler.response_streaming:
                 return state, _handle_stream_stream(
-                    rpc_event, state, method_handler, thread_pool
+                    rpc_event, context, state, method_handler, thread_pool
                 )
             else:
                 return state, _handle_stream_unary(
-                    rpc_event, state, method_handler, thread_pool
+                    rpc_event, context, state, method_handler, thread_pool
                 )
         else:
             if method_handler.response_streaming:
                 return state, _handle_unary_stream(
-                    rpc_event, state, method_handler, thread_pool
+                    rpc_event, context, state, method_handler, thread_pool
                 )
             else:
                 return state, _handle_unary_unary(
-                    rpc_event, state, method_handler, thread_pool
+                    rpc_event, context, state, method_handler, thread_pool
                 )
 
 
@@ -1012,9 +1022,10 @@ def _handle_call(
     if not rpc_event.success:
         return None, None
     if rpc_event.call_details.method is not None:
+        context = contextvars.copy_context()
         try:
             method_handler = _find_method_handler(
-                rpc_event, generic_handlers, interceptor_pipeline
+                rpc_event, context, generic_handlers, interceptor_pipeline
             )
         except Exception as exception:  # pylint: disable=broad-except
             details = "Exception servicing handler: {}".format(exception)
@@ -1047,7 +1058,7 @@ def _handle_call(
             )
         else:
             return _handle_with_method_handler(
-                rpc_event, method_handler, thread_pool
+                rpc_event, context, method_handler, thread_pool
             )
     else:
         return None, None
