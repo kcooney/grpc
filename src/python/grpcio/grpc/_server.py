@@ -926,14 +926,18 @@ def _handle_stream_stream(
     )
 
 
-def _create_callback_decorator() -> Callable[[_CallbackFunction], _CallbackFunction]:
+def _create_callback_decorator() -> (
+    Callable[[_CallbackFunction], _CallbackFunction]
+):
     return lambda callback: callback
 
 
 try:
     import contextvars  # pylint: disable=wrong-import-position
 
-    def _create_contextvars_callback_decorator() -> Callable[[_CallbackFunction], _CallbackFunction]:
+    def _create_contextvars_callback_decorator() -> (
+        Callable[[_CallbackFunction], _CallbackFunction]
+    ):
         context = contextvars.copy_context()
 
         def decorator(func: _CallbackFunction) -> _CallbackFunction:
@@ -977,8 +981,12 @@ def _find_method_handler(
     method_handler: Optional[grpc.RpcMethodHandler]
     if interceptor_pipeline is not None:
         execute = callback_decorator(interceptor_pipeline.execute)
-        query_handlers_in_unique_context = _create_callback_decorator()(query_handlers)
-        method_handler = execute(query_handlers_in_unique_context, handler_call_details)
+        query_handlers_in_unique_context = _create_callback_decorator()(
+            query_handlers
+        )
+        method_handler = execute(
+            query_handlers_in_unique_context, handler_call_details
+        )
     else:
         method_handler = query_handlers(handler_call_details)
 
