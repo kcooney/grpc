@@ -17,7 +17,9 @@ from __future__ import annotations
 
 import collections
 from concurrent import futures
+import contextvars
 import enum
+import functools
 import logging
 import threading
 import time
@@ -50,6 +52,7 @@ from grpc._typing import ResponseType
 from grpc._typing import SerializingFunction
 from grpc._typing import ServerCallbackTag
 from grpc._typing import ServerTagCallbackType
+from grpc._utilities import RpcMethodHandler
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -76,6 +79,8 @@ _EMPTY_FLAGS = 0
 
 _DEALLOCATED_SERVER_CHECK_PERIOD_S = 1.0
 _INF_TIMEOUT = 1e9
+
+_CallbackFunction = Callback[..., Any]
 
 
 def _serialized_request(request_event: cygrpc.BaseEvent) -> bytes:
@@ -922,12 +927,23 @@ def _handle_stream_stream(
     )
 
 
+def _called_in_context(context: contextvars.Context, func: _CallbackFunction) -> _CallbackFunction:
+    if func is None:
+        return func
+
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs) -> Any:
+        return context.run(func, *args, **kwargs)
+
+    return wrapper
+
+
 def _find_method_handler(
     rpc_event: cygrpc.BaseEvent,
     generic_handlers: List[grpc.GenericRpcHandler],
     interceptor_pipeline: Optional[_interceptor._ServicePipeline],
 ) -> Optional[grpc.RpcMethodHandler]:
-    def query_handlers(
+    def find_method_handler(
         handler_call_details: _HandlerCallDetails,
     ) -> Optional[grpc.RpcMethodHandler]:
         for generic_handler in generic_handlers:
@@ -936,17 +952,34 @@ def _find_method_handler(
                 return method_handler
         return None
 
+    # Call handlers in a different context than interceptors.
+    query_handlers = _called_in_context(contextvars.copy_context(), find_method_handler)
+
     handler_call_details = _HandlerCallDetails(
         _common.decode(rpc_event.call_details.method),
         rpc_event.invocation_metadata,
     )
 
+    context = contextvars.copy_context()   # Call interceptors and RPC in the same context.
+    method_handler: Optional[grpc.RpcMethodHandler]
     if interceptor_pipeline is not None:
-        return interceptor_pipeline.execute(
-            query_handlers, handler_call_details
-        )
+        method_handler = context.run(interceptor_pipeline.execute, query_handlers, handler_call_details)
     else:
-        return query_handlers(handler_call_details)
+        method_handler = query_handlers(handler_call_details)
+
+    if method_handler is None:
+        return None
+
+    return RpcMethodHandler(
+        request_streaming=method_handler.request_streaming,
+        response_streaming=method_handler.response_streaming,
+        request_deserializer=method_handler.request_deserializer,
+        response_serializer=method_handler.response_serializer,
+        unary_unary=_called_in_context(context, method_handler.unary_unary),
+        unary_stream=_called_in_context(context, method_handler.unary_stream),
+        stream_unary=_called_in_context(context, method_handler.stream_unary),
+        stream_stream=_called_in_context(context, method_handler.stream_stream),
+    )
 
 
 def _reject_rpc(
