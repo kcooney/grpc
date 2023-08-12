@@ -927,7 +927,9 @@ def _handle_stream_stream(
     )
 
 
-def _called_in_context(context: contextvars.Context, func: _CallbackFunction) -> _CallbackFunction:
+def _called_in_context(
+    context: contextvars.Context, func: _CallbackFunction
+) -> _CallbackFunction:
     if func is None:
         return func
 
@@ -953,17 +955,23 @@ def _find_method_handler(
         return None
 
     # Call handlers in a different context than interceptors.
-    query_handlers = _called_in_context(contextvars.copy_context(), find_method_handler)
+    query_handlers = _called_in_context(
+        contextvars.copy_context(), find_method_handler
+    )
 
     handler_call_details = _HandlerCallDetails(
         _common.decode(rpc_event.call_details.method),
         rpc_event.invocation_metadata,
     )
 
-    context = contextvars.copy_context()   # Call interceptors and RPC in the same context.
+    context = (
+        contextvars.copy_context()
+    )  # Call interceptors and RPC in the same context.
     method_handler: Optional[grpc.RpcMethodHandler]
     if interceptor_pipeline is not None:
-        method_handler = context.run(interceptor_pipeline.execute, query_handlers, handler_call_details)
+        method_handler = context.run(
+            interceptor_pipeline.execute, query_handlers, handler_call_details
+        )
     else:
         method_handler = query_handlers(handler_call_details)
 
