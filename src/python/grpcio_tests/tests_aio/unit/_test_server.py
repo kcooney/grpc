@@ -159,7 +159,11 @@ def _create_extra_generic_handler(servicer: TestServiceServicer):
 
 
 async def start_test_server(
-    port=0, secure=False, server_credentials=None, interceptors=None, record: Optional[list]=None,
+    port=0,
+    secure=False,
+    server_credentials=None,
+    interceptors=None,
+    record: Optional[list] = None,
 ):
     server = aio.server(
         options=(("grpc.so_reuseport", 0),), interceptors=interceptors

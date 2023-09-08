@@ -26,7 +26,8 @@ from grpc.experimental import wrap_server_method_handler
 from src.proto.grpc.testing import messages_pb2
 from src.proto.grpc.testing import test_pb2_grpc
 from tests_aio.unit._test_base import AioTestBase
-from tests_aio.unit._test_server import start_test_server, TEST_CONTEXT_VAR
+from tests_aio.unit._test_server import TEST_CONTEXT_VAR
+from tests_aio.unit._test_server import start_test_server
 
 _NUM_STREAM_RESPONSES = 5
 _REQUEST_PAYLOAD_SIZE = 7
@@ -45,7 +46,9 @@ class _LoggingInterceptor(aio.ServerInterceptor):
         ],
         handler_call_details: grpc.HandlerCallDetails,
     ) -> grpc.RpcMethodHandler:
-        self.record.append(self.tag + ":" + TEST_CONTEXT_VAR.get("intercept_service"))
+        self.record.append(
+            self.tag + ":" + TEST_CONTEXT_VAR.get("intercept_service")
+        )
         return await continuation(handler_call_details)
 
 
@@ -54,7 +57,10 @@ class _ContextVarSettingInterceptor(aio.ServerInterceptor):
         self.value = value
 
         def abort(ignored_request, context: grpc.aio.ServicerContext) -> None:
-            context.abort(grpc.StatusCode.FAILED_PRECONDITION, "TEST_CONTEXT_VAR should not have a value")
+            context.abort(
+                grpc.StatusCode.FAILED_PRECONDITION,
+                "TEST_CONTEXT_VAR should not have a value",
+            )
 
         self._abort_handler = grpc.unary_unary_rpc_method_handler(abort)
 
@@ -167,7 +173,9 @@ async def _create_server_stub_pair(
 
     Returning the server object to protect it from being garbage collected.
     """
-    server_target, server = await start_test_server(interceptors=interceptors, record=record)
+    server_target, server = await start_test_server(
+        interceptors=interceptors, record=record
+    )
     channel = aio.insecure_channel(server_target)
     return server, test_pb2_grpc.TestServiceStub(channel)
 
@@ -190,7 +198,7 @@ class TestServerInterceptor(AioTestBase):
                 _LoggingInterceptor("log1", record),
                 _ContextVarSettingInterceptor("context_var_value"),
                 _LoggingInterceptor("log2", record),
-            )
+            ),
         )
 
         async with aio.insecure_channel(server_target) as channel:
@@ -321,7 +329,7 @@ class TestServerInterceptor(AioTestBase):
         server, stub = await _create_server_stub_pair(
             record,
             _ContextVarSettingInterceptor("context_var_value"),
-            _LoggingInterceptor("log_unary_stream", record)
+            _LoggingInterceptor("log_unary_stream", record),
         )
 
         # Prepares the request
@@ -354,7 +362,7 @@ class TestServerInterceptor(AioTestBase):
         server, stub = await _create_server_stub_pair(
             record,
             _ContextVarSettingInterceptor("context_var_value"),
-            _LoggingInterceptor("log_stream_unary", record)
+            _LoggingInterceptor("log_stream_unary", record),
         )
 
         # Invokes the actual RPC
@@ -392,7 +400,7 @@ class TestServerInterceptor(AioTestBase):
         server, stub = await _create_server_stub_pair(
             record,
             _ContextVarSettingInterceptor("context_var_value"),
-            _LoggingInterceptor("log_stream_stream", record)
+            _LoggingInterceptor("log_stream_stream", record),
         )
 
         # Prepares the request
