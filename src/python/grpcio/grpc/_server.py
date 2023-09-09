@@ -953,7 +953,8 @@ def _find_method_handler(
 
     if interceptor_pipeline is not None:
         return context.run(
-            interceptor_pipeline.execute, query_handlers, handler_call_details)
+            interceptor_pipeline.execute, query_handlers, handler_call_details
+        )
     else:
         return context.run(query_handlers, handler_call_details)
 
