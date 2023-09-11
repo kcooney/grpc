@@ -951,13 +951,17 @@ def _find_method_handler(
 
     if interceptor_pipeline is not None:
         return state.context.run(
-            interceptor_pipeline.execute, query_handlers, handler_call_details)
+            interceptor_pipeline.execute, query_handlers, handler_call_details
+        )
     else:
         return state.context.run(query_handlers, handler_call_details)
 
 
 def _reject_rpc(
-    rpc_event: cygrpc.BaseEvent, rpc_state: _RPCState, status: cygrpc.StatusCode, details: bytes
+    rpc_event: cygrpc.BaseEvent,
+    rpc_state: _RPCState,
+    status: cygrpc.StatusCode,
+    details: bytes,
 ):
     operations = (
         _get_initial_metadata_operation(rpc_state, None),
@@ -1052,7 +1056,8 @@ def _handle_call(
             return (
                 rpc_state,
                 _handle_with_method_handler(
-                    rpc_event, rpc_state, method_handler, thread_pool)
+                    rpc_event, rpc_state, method_handler, thread_pool
+                ),
             )
     else:
         return None, None
