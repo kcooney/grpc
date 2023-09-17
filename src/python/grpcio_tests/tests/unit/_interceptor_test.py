@@ -313,7 +313,11 @@ class _ContextVarSettingInterceptor(grpc.ServerInterceptor):
 
     def intercept_service(self, continuation, handler_call_details):
         old_value = _TEST_CONTEXT_VAR.get("")
-        assert not old_value, "expected context var to have no value but was '{}'".format(old_value)
+        assert (
+            not old_value
+        ), "expected context var to have no value but was '{}'".format(
+            old_value
+        )
         _TEST_CONTEXT_VAR.set(self.value)
         return continuation(handler_call_details)
 
